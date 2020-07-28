@@ -21,6 +21,19 @@ type HttpError struct {
 	Message    string
 }
 
+type RequestLogger struct {
+	Request *http.Request
+}
+
+type FileUploadHandler struct {
+	UploadDir string
+}
+
+type FileUploadContext struct {
+	Request *http.Request
+	Logger  *RequestLogger
+}
+
 func NewHttpError(code int, message string) *HttpError {
 	return &HttpError{
 		StatusCode: code,
@@ -32,21 +45,18 @@ func (e *HttpError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Message)
 }
 
-type RequestLogger struct {
-	Request *http.Request
-}
-
 func (l *RequestLogger) Print(v interface{}) {
 	log.Printf("%s - %s", l.Request.RemoteAddr, v)
 }
 
-type FileUploadHandler struct {
-	UploadDir string
+func (l *RequestLogger) Printf(format string, a ...interface{}) {
+	l.Print(fmt.Sprintf(format, a...))
 }
 
 func (h *FileUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger := &RequestLogger{r}
-	res, err := h.handleFileUpload(w, r)
+	context := &FileUploadContext{r, logger}
+	res, err := h.handleFileUpload(context)
 	if res != nil {
 		w.WriteHeader(res.StatusCode)
 		_, err := w.Write([]byte(res.Message))
@@ -72,12 +82,15 @@ func (h *FileUploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *FileUploadHandler) handleFileUpload(w http.ResponseWriter, r *http.Request) (*HttpResponse, error) {
-	if r.Method != "POST" {
+func (h *FileUploadHandler) handleFileUpload(c *FileUploadContext) (*HttpResponse, error) {
+	logger := c.Logger
+	req := c.Request
+
+	if req.Method != "POST" {
 		return nil, NewHttpError(404, "Not Found")
 	}
 
-	mr, err := r.MultipartReader()
+	mr, err := req.MultipartReader()
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +105,8 @@ func (h *FileUploadHandler) handleFileUpload(w http.ResponseWriter, r *http.Requ
 			break
 		}
 
-		f, err := h.createFile(part)
+		filename := h.createFilename(part)
+		f, err := h.createFile(filename)
 		if err != nil {
 			return nil, err
 		}
@@ -111,19 +125,23 @@ func (h *FileUploadHandler) handleFileUpload(w http.ResponseWriter, r *http.Requ
 				return nil, err
 			}
 		}
+		logger.Printf("File uploaded: %s", filename)
 	}
 
 	return &HttpResponse{200, "File uploaded"}, nil
 }
 
-func (h *FileUploadHandler) createFile(part *multipart.Part) (*os.File, error) {
+func (h *FileUploadHandler) createFilename(part *multipart.Part) string {
 	ts := time.Now().Unix()
-	filename := fmt.Sprintf("%d-%s", ts, part.FileName())
+	return fmt.Sprintf("%d-%s", ts, part.FileName())
+}
+
+func (h *FileUploadHandler) createFile(filename string) (*os.File, error) {
 	return os.Create(fmt.Sprintf("%s/%s", h.UploadDir, filename))
 }
 
 func main() {
-	err := start("0.0.0.0:4500", "./uploaded")
+	err := start("0.0.0.0:4500", "./uploads")
 	if err != nil {
 		log.Fatal(err)
 	}
