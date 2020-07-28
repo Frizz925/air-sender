@@ -1,0 +1,13 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.container {
+  margin: 16px;
+}
+
+.field {
+  margin-bottom: 8px;
+}
